@@ -8,39 +8,41 @@ Este projeto simula uma Cidade Inteligente com sensores e atuadores que se comun
 
 Um sistema distribuído para aprendizado de comunicação entre processos. Ele simula:
 
-- **Dispositivos inteligentes** (sensores e atuadores)
-- **Gateway central** para coordenação
-- **App cliente** para interface de controle
+- **Dispositivos inteligentes**: sensores e atuadores que interagem com o ambiente.
+- **Gateway central**: responsável pela coordenação e comunicação entre dispositivos.
+- **App cliente**: interface de controle e monitoramento em tempo real.
 
 ---
 
 ## 🔧 Tecnologias Utilizadas
 
-- **Python** (gateway e sensores) SDK Version 3.12.3
-- **Node.js** (atuador/atuador extra) SDK Version 20.18.2
-- **Flutter/Dart** (aplicativo cliente) SDK Version 3.27.2
-- **Sockets TCP e UDP**
-- **UDP Multicast** para descoberta de dispositivos
-- **Protocol Buffers (protobuf)** para serialização de mensagens (SDK Python Version 6.31.1)
+- **Python**: desenvolvimento do gateway e sensores (SDK versão 3.12.3).
+- **Node.js**: implementação de atuadores (SDK versão 20.18.2).
+- **Flutter/Dart**: criação do aplicativo cliente (SDK versão 3.27.2).
+- **Sockets TCP e UDP**: comunicação entre dispositivos.
+- **UDP Multicast**: descoberta de dispositivos na rede.
+- **Protocol Buffers (protobuf)**: serialização de mensagens (SDK Python versão 6.31.1).
 
 ---
 
 ## 📦 Estrutura de Diretórios
 
+```
 cidade_inteligente/
-├── gateway/ # Código do Gateway Python
-│ └── gateway.py
-├── dispositivos/
-│ ├── sensor_temp.py # Sensor em Python
-│ └── poste_node/ # Atuador em Node.js
-│ └── poste.js
-├── cliente_flutter/ # App Flutter
-│ └── lib/
-│ ├── main.dart
-│ ├── simulador_falhas.dart
-│ └── protos/
-│ └── mensagem.pb.dart
-├── protos/
-│ └── mensagem.proto # Definições Protobuf
-├── README.md
-└── criar_ambiente.md # Instruções de configuração por linguagem
+├── gateway/                # Código do Gateway em Python
+│   └── gateway.py
+├── dispositivos/           # Código dos dispositivos inteligentes
+│   ├── sensor_temp.py      # Sensor de temperatura em Python
+│   └── poste_node/         # Atuador em Node.js
+│       └── poste.js
+├── cliente_flutter/        # Aplicativo Flutter
+│   └── lib/
+│       ├── main.dart       # Arquivo principal do app
+│       ├── simulador_falhas.dart # Simulação de falhas
+│       └── protos/
+│           └── mensagem.pb.dart # Arquivo gerado pelo Protobuf
+├── protos/                 # Definições de mensagens Protobuf
+│   └── mensagem.proto
+├── README.md               # Documentação principal
+└── criar_ambiente.md       # Instruções de configuração por linguagem
+```

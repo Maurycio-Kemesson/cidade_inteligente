@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+message DispositivoInfo {
+  string tipo = 1;
+  string id = 2;
+  string ip = 3;
+  int32 porta = 4;
+  string estado = 5;
+}
+
+message Comando {
+  string id = 1;
+  string acao = 2;
+  string valor = 3;
+}
+
+message Estado {
+  string id = 1;
+  string estado = 2;
+}
+
+message LeituraSensor {
+  string id = 1;
+  string tipo = 2;
+  string valor = 3;
+  string timestamp = 4;
+}
+
+message ListaDispositivos {
+  repeated DispositivoInfo dispositivos = 1;
+}

@@ -1,0 +1,16 @@
+DispositivoInfo.tipo max_size: 64
+DispositivoInfo.id max_size: 64
+DispositivoInfo.ip max_size: 64
+DispositivoInfo.estado max_size: 64
+
+Comando.id max_size: 64
+Comando.acao max_size: 64
+Comando.valor max_size: 64
+
+Estado.id max_size: 64
+Estado.estado max_size: 64
+
+LeituraSensor.id max_size: 64
+LeituraSensor.tipo max_size: 64
+LeituraSensor.valor max_size: 64
+LeituraSensor.timestamp max_size: 64

@@ -1,11 +1,14 @@
 syntax = "proto3";
 
 
+// Gateway discovery
 message Address {
   string ip = 1;
   uint32 port = 2;
 }
 
+
+// Devices registration
 enum DeviceType {
   DT_UNSPECIFIED = 0;
   SENSOR = 1;
@@ -29,28 +32,24 @@ message JoinReply {
   uint32 report_port = 1;
 }
 
+
+// Sensors-Gateway messages
 message SensorReading {
   string device_name = 1;
   string reading_value = 2;
-  string timestamp = 3;
-  string metadata = 4;
+  string metadata = 3;
+  string timestamp = 4;
   bool is_online = 5;
 }
 
-message SensorsReport {
-  repeated SensorReading readings = 1;
-}
 
+// Actuators-Gateway messages
 message ActuatorUpdate {
   string device_name = 1;
   string state = 2;
   string metadata = 3;
   string timestamp = 4;
   bool is_online = 5;
-}
-
-message ActuatorsReport {
-  repeated ActuatorUpdate updates = 1;
 }
 
 enum CommandType {
@@ -75,4 +74,69 @@ enum ComplyStatus {
 message ActuatorComply {
   ComplyStatus status = 1;
   string body = 2;
+}
+
+
+// Clients-Gateway messages
+message SensorData {
+
+  message SimpleReading {
+    string timestamp = 1;
+    string reading_value = 2;
+  }
+
+  string device_name = 1;
+  string metadata = 2;
+  repeated SimpleReading readings = 3;
+  bool is_online = 4;
+}
+
+message SensorsReport {
+  repeated SensorReading devices = 1;
+}
+
+message ActuatorsReport {
+  repeated ActuatorUpdate devices = 1;
+}
+
+message SendNextReport {}
+
+message ConnectRequest {
+  uint32 sensors_report_port = 1;
+  uint32 actuators_report_port = 2;
+}
+
+enum RequestType {
+  RT_UNSPECIFIED = 0;
+  GET_SENSOR_DATA = 1;
+  GET_ACTUATOR_UPDATE = 2;
+  SET_ACTUATOR_STATE = 3;
+  RUN_ACTUATOR_ACTION = 4;
+}
+
+message ClientRequest {
+  RequestType type = 1;
+  string device_name = 2;
+  // empty
+  // OR action name if RequestType.RUN_ACTUATOR_ACTION
+  // OR stringfyed JSON state if RequestType.SET_ACTUATOR_STATE
+  string body = 3;
+}
+
+enum ReplyStatus {
+  RS_UNSPECIFIED = 0;
+  OK = 1;
+  FAIL = 2;
+  INVALID_STATE = 3;
+  UNKNOWN_DEVICE = 4;
+  UNKNOWN_COMMAND = 5;
+}
+
+message ClientReply {
+  ReplyStatus status = 1;
+  RequestType reply_to = 2;
+  // empty
+  // OR SensorData message if RequestType.GET_SENSOR_DATA
+  // OR ActuatorUpdate message if RequestType.GET_ACTUATOR_UPDATE
+  bytes data = 3;
 }

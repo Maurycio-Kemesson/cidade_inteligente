@@ -72,6 +72,7 @@ enum ComplyStatus {
   CS_OK = 1;
   CS_FAIL = 2;
   CS_UNKNOWN_ACTION = 3;
+  CS_INVALID_STATE = 4;
 }
 
 message ActuatorComply {
@@ -104,7 +105,7 @@ message ActuatorsReport {
 
 message SendNextReport {}
 
-message ConnectRequest {
+message ConnectionRequest {
   uint32 sensors_report_port = 1;
   uint32 actuators_report_port = 2;
 }
@@ -132,7 +133,7 @@ enum ReplyStatus {
   RS_FAIL = 2;
   RS_INVALID_STATE = 3;
   RS_UNKNOWN_DEVICE = 4;
-  RS_UNKNOWN_COMMAND = 5;
+  RS_UNKNOWN_ACTION = 5;
 }
 
 message ClientReply {

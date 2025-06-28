@@ -6,6 +6,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from messages_pb2 import ActuatorUpdate, ActuatorsReport
 from messages_pb2 import ActuatorComply, ComplyStatus
+from messages_pb2 import CommandType, ActuatorCommand
 
 
 def actuators_report_generator(args):
@@ -37,29 +38,62 @@ def actuators_report_generator(args):
         args.pending_actuators_updates.clear()
 
 
-def send_command(args, actuator_name, command_message_bytes):
-    logger = logging.getLogger(f'SEND_COMMAND_TO_{actuator_name}')
-    logger.info('Tentando enviar comando para %s', actuator_name)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        actuator = args.db.get_actuator(actuator_name)
-        if actuator is None:
-            logger.warning('Atuador %s não está registrado', actuator_name)
+def build_command_message(command_type, command_body):
+    match command_type:
+        case CommandType.CT_ACTION | CommandType.CT_SET_STATE:
+            command = ActuatorCommand(type=command_type, body=command_body)
+        case CommandType.CT_GET_STATE:
+            command = ActuatorCommand(type=CommandType.CT_GET_STATE)
+        case _:
             return None
+    return command.SerializeToString()
+
+
+def send_command_to_actuator(
+    args,
+    actuator_name,
+    command_type,
+    command_body,
+    from_address,
+):
+    logger = logging.getLogger(
+        f'SEND_COMMAND_TO_{actuator_name}_FROM_{from_address}'
+    )
+    logger.info(
+        'Tentando enviar comando de %s para atuador %s',
+        from_address,
+        actuator_name,
+    )
+    command = build_command_message(command_type, command_body)
+    if command is None:
+        logger.warning(
+            'Comando fornecido (`command_type=%d`) é inválido', command_type
+        )
+        return None
+    actuator = args.db.get_actuator(actuator_name)
+    if actuator is None:
+        logger.warning('Atuador %s não está registrado', actuator_name)
+        return None
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(args.actuators_timeout)
         try:
             sock.connect(actuator['address'])
         except Exception as e:
             logger.error(
                 'Erro ao estabelecer conexão com %s: (%s) %s',
-                actuator_name, type(e).__name__, e
+                actuator_name,
+                type(e).__name__,
+                e,
             )
             msg = None
         try:
-            sock.send(command_message_bytes)
+            sock.send(command)
         except Exception as e:
             logger.error(
                 'Erro ao enviar comando para %s: (%s) %s',
-                actuator_name, type(e).__name__, e
+                actuator_name,
+                type(e).__name__,
+                e,
             )
             msg = None
         try:
@@ -67,7 +101,9 @@ def send_command(args, actuator_name, command_message_bytes):
         except Exception as e:
             logger.error(
                 'Erro ao receber resposta de %s: (%s) %s',
-                actuator_name, type(e).__name__, e
+                actuator_name,
+                type(e).__name__,
+                e,
             )
             msg = None
         if msg is None:
@@ -78,12 +114,13 @@ def send_command(args, actuator_name, command_message_bytes):
         reply = ActuatorComply()
         reply.ParseFromString(msg)
         if reply.status is ComplyStatus.CS_OK:
-            name = reply.update.device_name
             state = json.loads(reply.update.state)
             metadata = json.loads(reply.update.metadata)
             timestamp = datetime.fromisoformat(reply.update.timestamp)
             with args.db_actuators_lock:
-                args.db.add_actuator_update(name, state, metadata, timestamp)
+                args.db.add_actuator_update(
+                    actuator_name, state, metadata, timestamp
+                )
                 args.pending_actuators_updates.set()
         return reply
 

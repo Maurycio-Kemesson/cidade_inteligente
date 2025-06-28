@@ -88,6 +88,8 @@ class Database:
             actuator = self.devices[1][name]
         except KeyError:
             return False
+        if timestamp < actuator['timestamp']:
+            return False
         actuator['state'] = state
         actuator['metadata'] = metadata
         actuator['timestamp'] = timestamp

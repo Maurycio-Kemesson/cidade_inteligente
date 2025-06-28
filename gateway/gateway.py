@@ -41,9 +41,7 @@ def _run(args):
         multicaster.start()
         sgenerator.start()
         agenerator.start()
-        while True:
-            time.sleep(10.0)
-        # clients_listener(args)
+        clients_listener(args)
     except BaseException as e:
         args.stop_flag.set()
         if isinstance(e, KeyboardInterrupt):

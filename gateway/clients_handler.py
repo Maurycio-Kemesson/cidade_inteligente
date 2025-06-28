@@ -13,21 +13,23 @@ from messages_pb2 import SensorReading, SensorData
 from messages_pb2 import ActuatorUpdate, SendNextReport
 
 
-def transmit_sensors_reports(args, addrs, stop_transmission_flag):
-    logger = logging.getLogger(f'TRANSMIT_SENSORS_REPORTS_{addrs}')
+def transmit_sensors_reports(args, address, stop_transmission_flag):
+    logger = logging.getLogger(f'TRANSMIT_SENSORS_REPORTS_{address}')
     logger.info(
-        'Preparando envio de relatórios para o cliente em %s', addrs
+        'Preparando envio de relatórios para o cliente em %s', address
     )
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         sock.settimeout(args.reports_timeout)
         try:
-            sock.connect(addrs)
+            sock.connect(address)
         except Exception as e:
             stop_transmission_flag.set()
             logger.error(
-                'Erro ao estabelecer conexão com cliente %s: (%s) %s',
-                addrs, type(e).__name__, e
+                'Erro ao estabelecer conexão para '
+                'envio de relatórios: (%s) %s',
+                type(e).__name__,
+                e,
             )
             raise e
         last_report_sent = 0
@@ -42,8 +44,7 @@ def transmit_sensors_reports(args, addrs, stop_transmission_flag):
             except Exception as e:
                 stop_transmission_flag.set()
                 logger.error(
-                    'Erro ao enviar relatório #%d para cliente em %s',
-                    report_number, addrs
+                    'Erro ao tentar enviar relatório #%d', report_number
                 )
                 raise e
             fail_count = 0
@@ -58,9 +59,9 @@ def transmit_sensors_reports(args, addrs, stop_transmission_flag):
                             continue
                     stop_transmission_flag.set()
                     logger.error(
-                        'Erro ao receber confirmação de envio '
-                        'do relatório #%d para o cliente em %s',
-                        report_number, addrs
+                        'Erro no recebimento da confirmação '
+                        'de envio do relatório #%d',
+                        report_number,
                     )
                     raise e
             confirmation = SendNextReport()
@@ -68,21 +69,23 @@ def transmit_sensors_reports(args, addrs, stop_transmission_flag):
             last_report_sent = report_number
 
 
-def transmit_actuators_reports(args, addrs, stop_transmission_flag):
-    logger = logging.getLogger(f'TRANSMIT_ACTUATORS_REPORTS_{addrs}')
+def transmit_actuators_reports(args, address, stop_transmission_flag):
+    logger = logging.getLogger(f'TRANSMIT_ACTUATORS_REPORTS_{address}')
     logger.info(
-        'Preparando envio de relatórios para o cliente em %s', addrs
+        'Preparando envio de relatórios para o cliente em %s', address
     )
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         sock.settimeout(args.reports_timeout)
         try:
-            sock.connect(addrs)
+            sock.connect(address)
         except Exception as e:
             stop_transmission_flag.set()
             logger.error(
-                'Erro ao estabelecer conexão com cliente %s: (%s) %s',
-                addrs, type(e).__name__, e
+                'Erro ao estabelecer conexão para '
+                'envio de relatórios: (%s) %s',
+                type(e).__name__,
+                e,
             )
             raise e
         last_report_sent = 0
@@ -97,8 +100,7 @@ def transmit_actuators_reports(args, addrs, stop_transmission_flag):
             except Exception as e:
                 stop_transmission_flag.set()
                 logger.error(
-                    'Erro ao enviar relatório #%d para cliente em %s',
-                    report_number, addrs
+                    'Erro ao tentar enviar relatório #%d', report_number
                 )
                 raise e
             fail_count = 0
@@ -113,9 +115,9 @@ def transmit_actuators_reports(args, addrs, stop_transmission_flag):
                             continue
                     stop_transmission_flag.set()
                     logger.error(
-                        'Erro ao receber confirmação de envio '
-                        'do relatório #%d para o cliente em %s',
-                        report_number, addrs
+                        'Erro no recebimento da confirmação '
+                        'de envio do relatório #%d',
+                        report_number,
                     )
                     raise e
             confirmation = SendNextReport()
@@ -148,9 +150,9 @@ def process_client_request(request):
     return reply
 
 
-def client_handler(args, sock, addrs):
-    logger = logging.getLogger(f'CLIENT_HANDLER_{addrs}')
-    logger.info('Gerenciando conexão com o cliente em %s', addrs)
+def client_handler(args, sock, address):
+    logger = logging.getLogger(f'CLIENT_HANDLER_{address}')
+    logger.info('Gerenciando conexão com o cliente em %s', address)
     trans_stop_flag = threading.Event()
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -160,14 +162,14 @@ def client_handler(args, sock, addrs):
             conn_req.ParseFromString(sock.recv(1024))
         except Exception as e:
             logger.error(
-                'Não foi possível estabelecer '
-                'conexão com o cliente em %s: (%s) %s',
-                addrs, type(e).__name__, e
+                'Não foi possível estabelecer conexão com o cliente: (%s) %s',
+                type(e).__name__,
+                e,
             )
             raise e
         sensors_trans, actuators_trans = init_transmissions(
             args,
-            addrs[0],
+            address[0],
             conn_req.sensors_report_port,
             conn_req.actuators_report_port,
             trans_stop_flag
@@ -181,8 +183,9 @@ def client_handler(args, sock, addrs):
             except Exception as e:
                 logger.error(
                     'Erro durante o recebimento da '
-                    'requisição do cliente em %s: (%s) %s',
-                    addrs, type(e).__name__, e
+                    'requisição do cliente: (%s) %s',
+                    type(e).__name__,
+                    e,
                 )
                 raise e
             try:
@@ -190,16 +193,18 @@ def client_handler(args, sock, addrs):
             except Exception as e:
                 logger.error(
                     'Erro durante o processamento da '
-                    'requisição do cliente em %s: (%s) %s',
-                    addrs, type(e).__name__, e
+                    'requisição do cliente: (%s) %s',
+                    type(e).__name__,
+                    e,
                 )
                 raise e
             try:
                 sock.sendall(reply.SerializeToString())
             except Exception as e:
                 logger.error(
-                    'Erro ao enviar resposta ao cliente em %s: (%s) %s',
-                    addrs, type(e).__name__, e
+                    'Erro ao enviar resposta ao cliente: (%s) %s',
+                    type(e).__name__,
+                    e,
                 )
                 raise e
     finally:

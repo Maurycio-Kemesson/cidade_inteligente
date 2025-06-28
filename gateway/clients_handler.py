@@ -152,28 +152,27 @@ def process_client_request(args, request, from_address, logger):
         case RequestType.RT_GET_SENSOR_DATA:
             with args.db_sensors_lock:
                 sensor = args.db.get_sensor(request.device_name)
-                if sensor is None:
-                    return ClientReply(
-                        status=ReplyStatus.RS_UNKNOWN_DEVICE,
-                        reply_to=request.type,
-                    )
-                metadata = json.dumps(sensor['metadata'])
-                readings = [
-                    SensorData.SimpleReading(
-                        timestamp=timestamp.isoformat(),
-                        reading_value=str(reading),
-                    )
-                    for timestamp, reading in sensor['data']
-                ]
-                is_online = (
-                    sensor['last_seen'][0] == datetime.date.today()
-                    and (
-                        time.monotonic() - sensor['last_seen'][1]
-                    ) <= args.sensors_tolerance
+            if sensor is None:
+                return ClientReply(
+                    status=ReplyStatus.RS_UNKNOWN_DEVICE,
+                    reply_to=request.type,
                 )
+            readings = [
+                SensorData.SimpleReading(
+                    timestamp=timestamp.isoformat(),
+                    reading_value=str(reading),
+                )
+                for timestamp, reading in sensor['data']
+            ]
+            is_online = (
+                sensor['last_seen'][0] == datetime.date.today()
+                and (
+                    time.monotonic() - sensor['last_seen'][1]
+                ) <= args.sensors_tolerance
+            )
             data = SensorData(
                 device_name=request.device_name,
-                metadata=metadata,
+                metadata=json.dumps(sensor['metadata']),
                 readings=readings,
                 is_online=is_online,
             )
@@ -185,18 +184,18 @@ def process_client_request(args, request, from_address, logger):
         case RequestType.RT_GET_ACTUATOR_UPDATE:
             with args.db_actuators_lock:
                 actuator = args.db.get_actuator(request.device_name)
-                if actuator is None:
-                    return ClientReply(
-                        status=ReplyStatus.RS_UNKNOWN_DEVICE,
-                        reply_to=request.type,
-                    )
-                update = ActuatorUpdate(
-                    device_name=request.device_name,
-                    state=json.dumps(actuator['state']),
-                    metadata=json.dumps(actuator['metadata']),
-                    timestamp=actuator['timestamp'].isoformat(),
-                    is_online=actuator['is_online'],
+            if actuator is None:
+                return ClientReply(
+                    status=ReplyStatus.RS_UNKNOWN_DEVICE,
+                    reply_to=request.type,
                 )
+            update = ActuatorUpdate(
+                device_name=request.device_name,
+                state=json.dumps(actuator['state']),
+                metadata=json.dumps(actuator['metadata']),
+                timestamp=actuator['timestamp'].isoformat(),
+                is_online=actuator['is_online'],
+            )
             return ClientReply(
                 status=ReplyStatus.OK,
                 reply_to=request.type,

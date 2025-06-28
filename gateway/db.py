@@ -2,6 +2,7 @@ import os
 import time
 import pickle
 import datetime
+from copy import deepcopy
 from sortedcontainers import SortedList
 
 
@@ -56,20 +57,20 @@ class Database:
     
     def get_sensor(self, name):
         try:
-            return self.devices[0][name]
+            return deepcopy(self.devices[0][name])
         except KeyError:
             return None
     
     def get_actuator(self, name):
         try:
-            return self.devices[1][name]
+            return deepcopy(self.devices[1][name])
         except KeyError:
             return None
 
-    def get_actuator_by_address(self, address):
+    def get_actuator_name_by_address(self, address):
         for actuator in self.devices[1].values():
             if actuator['address'] == address:
-                return actuator
+                return actuator['name']
         return None
 
     def add_sensor_reading(self, name, value, metadata, timestamp):
@@ -106,19 +107,19 @@ class Database:
 
     def get_sensors_summary(self):
         summary = []
-        for sensor, sensor_data in self.devices[0].items():
+        for sensor_name, sensor_data in self.devices[0].items():
             try:
                 timestamp, reading_value = sensor_data['data'][-1]
             except IndexError:
                 continue
             summary.append({
-                'device_name': sensor,
+                'device_name': sensor_name,
                 'reading_value': reading_value,
-                'metadata': sensor_data['metadata'],
+                'metadata': deepcopy(sensor_data['metadata']),
                 'timestamp': timestamp,
-                'last_seen': sensor_data['last_seen'],
+                'last_seen': deepcopy(sensor_data['last_seen']),
             })
         return summary
     
     def get_actuators_summary(self):
-        return [actuator for actuator in self.devices[1].values()]
+        return [deepcopy(actuator) for actuator in self.devices[1].values()]

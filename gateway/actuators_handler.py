@@ -18,6 +18,7 @@ def actuators_report_generator(args):
             continue
         with args.db_actuators_lock:
             actuators = args.db.get_actuators_summary()
+            args.pending_actuators_updates.clear()
         actuators = [
             ActuatorUpdate(
                 device_name=actuator['name'],
@@ -35,7 +36,6 @@ def actuators_report_generator(args):
         report_msg = ActuatorsReport(devices=actuators).SerializeToString()
         with args.db_actuators_report_lock:
             args.db.att_actuators_report(report_msg)
-        args.pending_actuators_updates.clear()
 
 
 def build_command_message(command_type, command_body):
@@ -133,14 +133,15 @@ def actuator_handler(args, sock, addrs):
         update = ActuatorUpdate()
         update.ParseFromString(msg)
     except Exception as e:
-        actuator = args.db.get_actuator_by_address(addrs)
+        with args.db_actuators_lock:
+            actuator = args.db.get_actuator_name_by_address(addrs)
         if actuator is None:
             logger.info(
                 'Não há nenhum atuador registrado com o endereço %s', addrs
             )
         else:
             with args.db_actuators_lock:
-                args.db.mark_actuator_as_offline(actuator['name'])
+                args.db.mark_actuator_as_offline(actuator)
                 args.pending_actuators_updates.set()
         logger.error(
             'Erro ao receber atualizações do atuador em %s: (%s) %s',

@@ -114,17 +114,14 @@ def actuator_handler(args, sock, addrs):
         sock.shutdown(socket.SHUT_RDWR)
         sock.close()
     name = update.device_name
-    if name.startswith('Lamp'):
-        state = json.loads(update.state)
-        metadata = json.loads(update.metadata)
-        timestamp = datetime.fromisoformat(update.timestamp)
-        if args.verbose:
-            logger.info(
-                'Atualização de lâmpada recebida: (%s, %s, %s)',
-                name, update.timestamp, 'ON' if state['is_on'] else 'OFF'
-            )
-    else:
-        return
+    state = json.loads(update.state)
+    metadata = json.loads(update.metadata)
+    timestamp = datetime.fromisoformat(update.timestamp)
+    if args.verbose:
+        logger.info(
+            'Atualização de lâmpada recebida: (%s, %s, %s)',
+            name, update.timestamp, 'ON' if state['isOn'] else 'OFF'
+        )
     with args.db_actuators_lock:
         result = args.db.add_actuator_update(name, state, metadata, timestamp)
         if result:

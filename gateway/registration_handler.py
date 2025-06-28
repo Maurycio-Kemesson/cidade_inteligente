@@ -51,7 +51,7 @@ def registration_handler(args, sock, addrs):
                     address=(req.device_address.ip, req.device_address.port),
                     state=json.loads(req.device_info.state),
                     metadata=json.loads(req.device_info.metadata),
-                    timestamp=datetime.fromisoformat(req.timestamp),
+                    timestamp=datetime.fromisoformat(req.device_info.timestamp),
                 )
         else:
             raise RuntimeError('Invalid device type')

@@ -2,3 +2,4 @@ protobuf
 sqlalchemy
 Flask
 Flask-RESTful
+PyYAML

@@ -32,20 +32,20 @@ def get_sensors_report():
 
 def get_actuators_report():
     actuators_repository = get_actuators_repository()
-    actuators = actuators_repository.get_all_actuators()
-    actuators_summary = []
-    for actuator in actuators:
-        actuators_summary.append(ActuatorUpdate(
+    actuators_summary = [
+        ActuatorUpdate(
             device_name=f'{actuator.category}-{actuator.id}',
             state=json.dumps(actuator.device_state),
             metadata=json.dumps(actuator.device_metadata),
             timestamp=actuator.timestamp.isoformat(),
             is_online=actuator.is_online(),
-        ))
+        )
+        for actuator in actuators_repository.get_all_actuators()
+    ]
     return ActuatorsReport(devices=actuators_summary).SerializeToString()
 
 
-def build_sensor_data(device_name):
+def get_sensor_data(device_name):
     sensors_repository = get_sensors_repository()
     sensor_category, sensor_id = device_name.split('-')
     sensor_id = int(sensor_id)
@@ -68,7 +68,7 @@ def build_sensor_data(device_name):
     )
 
 
-def build_actuator_update(device_name):
+def get_actuator_update(device_name):
     actuators_repository = get_actuators_repository()
     actuator_category, actuator_id = device_name.split('-')
     actuator_id = int(actuator_id)
@@ -84,7 +84,7 @@ def build_actuator_update(device_name):
     )
 
 
-def process_set_actuator_state(args, device_name, state_string):
+def process_set_actuator_state(device_name, state_string):
     actuators_repository = get_actuators_repository()
     actuator_category, actuator_id = device_name.split('-')
     actuator_id = int(actuator_id)
@@ -95,7 +95,6 @@ def process_set_actuator_state(args, device_name, state_string):
             reply_to=RequestType.RT_SET_ACTUATOR_STATE,
         )
     comply_msg = send_actuator_command(
-        args=args,
         actuator_id=actuator_id,
         actuator_category=actuator_category,
         command_type=CommandType.CT_SET_STATE,
@@ -119,7 +118,7 @@ def process_set_actuator_state(args, device_name, state_string):
     )
 
 
-def process_run_actuator_action(args, device_name, action_name):
+def process_run_actuator_action(device_name, action_name):
     actuators_repository = get_actuators_repository()
     actuator_category, actuator_id = device_name.split('-')
     actuator_id = int(actuator_id)
@@ -130,7 +129,6 @@ def process_run_actuator_action(args, device_name, action_name):
             reply_to=RequestType.RT_RUN_ACTUATOR_ACTION,
         )
     comply_msg = send_actuator_command(
-        args=args,
         actuator_id=actuator_id,
         actuator_category=actuator_category,
         command_type=CommandType.CT_ACTION,
@@ -153,61 +151,65 @@ def process_run_actuator_action(args, device_name, action_name):
     )
 
 
-def process_client_request(args, request):
-    match request.type:
-        case RequestType.RT_GET_SENSORS_REPORT:
-            return ClientReply(
-                status=ReplyStatus.RS_OK,
-                reply_to=RequestType.RT_GET_SENSORS_REPORT,
-                data=get_sensors_report(),
-            )
-        case RequestType.RT_GET_ACTUATORS_REPORT:
-            return ClientReply(
-                status=ReplyStatus.RS_OK,
-                reply_to=RequestType.RT_GET_ACTUATORS_REPORT,
-                data=get_actuators_report(),
-            )
-        case RequestType.RT_GET_SENSOR_DATA:
-            data = build_sensor_data(request.device_name)
-            if data is None:
+def process_client_request(request):
+    try:
+        match request.type:
+            case RequestType.RT_GET_SENSORS_REPORT:
                 return ClientReply(
-                    status=ReplyStatus.RS_UNKNOWN_DEVICE,
+                    status=ReplyStatus.RS_OK,
                     reply_to=request.type,
+                    data=get_sensors_report(),
                 )
-            return ClientReply(
-                status=ReplyStatus.RS_OK,
-                reply_to=request.type,
-                data=data.SerializeToString(),
-            )
-        case RequestType.RT_GET_ACTUATOR_UPDATE:
-            update = build_actuator_update(request.device_name)
-            if update is None:
+            case RequestType.RT_GET_ACTUATORS_REPORT:
                 return ClientReply(
-                    status=ReplyStatus.RS_UNKNOWN_DEVICE,
+                    status=ReplyStatus.RS_OK,
                     reply_to=request.type,
+                    data=get_actuators_report(),
                 )
-            return ClientReply(
-                status=ReplyStatus.RS_OK,
-                reply_to=request.type,
-                data=update.SerializeToString(),
-            )
-        case RequestType.RT_SET_ACTUATOR_STATE:
-            return process_set_actuator_state(
-                args=args,
-                device_name=request.device_name,
-                state_string=request.body,
-            )
-        case RequestType.RT_RUN_ACTUATOR_ACTION:
-            return process_run_actuator_action(
-                args=args,
-                device_name=request.device_name,
-                action_name=request.body,
-            )
-        case _:
-            return ClientReply(
-                status=ReplyStatus.RS_FAIL,
-                reply_to=RequestType.RT_UNSPECIFIED,
-            )
+            case RequestType.RT_GET_SENSOR_DATA:
+                data = get_sensor_data(request.device_name)
+                if data is None:
+                    return ClientReply(
+                        status=ReplyStatus.RS_UNKNOWN_DEVICE,
+                        reply_to=request.type,
+                    )
+                return ClientReply(
+                    status=ReplyStatus.RS_OK,
+                    reply_to=request.type,
+                    data=data.SerializeToString(),
+                )
+            case RequestType.RT_GET_ACTUATOR_UPDATE:
+                update = get_actuator_update(request.device_name)
+                if update is None:
+                    return ClientReply(
+                        status=ReplyStatus.RS_UNKNOWN_DEVICE,
+                        reply_to=request.type,
+                    )
+                return ClientReply(
+                    status=ReplyStatus.RS_OK,
+                    reply_to=request.type,
+                    data=update.SerializeToString(),
+                )
+            case RequestType.RT_SET_ACTUATOR_STATE:
+                return process_set_actuator_state(
+                    device_name=request.device_name,
+                    state_string=request.body,
+                )
+            case RequestType.RT_RUN_ACTUATOR_ACTION:
+                return process_run_actuator_action(
+                    device_name=request.device_name,
+                    action_name=request.body,
+                )
+            case _:
+                return ClientReply(
+                    status=ReplyStatus.RS_FAIL,
+                    reply_to=RequestType.RT_UNSPECIFIED,
+                )
+    except Exception:
+        return ClientReply(
+            status=ReplyStatus.RS_FAIL,
+            reply_to=request.type,
+        )
 
 
 def frame_message(message):
@@ -216,7 +218,7 @@ def frame_message(message):
     return msg_size + message
 
 
-def client_handler(args, sock, address):
+def client_handler(sock, address):
     try:
         logger = logging.getLogger(f'CLIENT_HANDLER_{address}')
         logger.info('Tratando requisição de um cliente em %s', address)
@@ -232,7 +234,7 @@ def client_handler(args, sock, address):
             )
             raise e
         try:
-            reply = process_client_request(args, request)
+            reply = process_client_request(request)
             reply = reply.SerializeToString()
         except Exception as e:
             logger.error(
@@ -262,20 +264,19 @@ def client_handler(args, sock, address):
             sock.close()
 
 
-def clients_listener(args):
+def clients_listener(stop_flag, clients_port):
     logger = logging.getLogger('CLIENTS_LISTENER')
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('', args.clients_port))
+        sock.bind(('', clients_port))
         sock.listen()
         logger.info(
-            'Escutando por requisições dos clientes em (%s, %s)',
-            args.host_ip,
-            args.clients_port,
+            'Escutando por requisições dos clientes na porta %d',
+            clients_port,
         )
-        sock.settimeout(args.base_timeout)
+        sock.settimeout(1.0)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            while not args.stop_flag.is_set():
+            while not stop_flag.is_set():
                 try:
                     conn, addrs = sock.accept()
                 except TimeoutError:
@@ -289,7 +290,7 @@ def clients_listener(args):
                     raise e
                 try:
                     conn.settimeout(sock.gettimeout())
-                    executor.submit(client_handler, args, conn, addrs)
+                    executor.submit(client_handler, conn, addrs)
                 except Exception:
                     try:
                         conn.shutdown(socket.SHUT_RDWR)

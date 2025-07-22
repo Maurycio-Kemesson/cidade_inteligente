@@ -5,27 +5,18 @@ from db.repositories import get_sensors_repository
 from messages_pb2 import SensorReading
 
 
-def sensors_listener(args):
+def sensors_listener(stop_flag, sensors_port):
     sensors_repository = get_sensors_repository()
     logger = logging.getLogger('SENSORS_LISTENER')
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind(('', args.sensors_port))
-        except Exception as e:
-            logger.error(
-                'Erro ao tentar vínculo com a porta %s: (%s) %s',
-                args.sensors_port,
-                type(e).__name__,
-                e,
-            )
-            raise e
+        sock.bind(('', sensors_port))
         logger.info(
-            'Escutando por dados sensoriais na porta %s',
-            args.sensors_port,
+            'Escutando por dados sensoriais na porta %d',
+            sensors_port,
         )
-        sock.settimeout(args.base_timeout)
-        while not args.stop_flag.is_set():
+        sock.settimeout(1.0)
+        while not stop_flag.is_set():
             try:
                 msg, addrs = sock.recvfrom(1024)
             except TimeoutError:

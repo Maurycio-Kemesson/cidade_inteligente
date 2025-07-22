@@ -19,7 +19,12 @@ def build_command_message(type, body):
     return msg.SerializeToString()
 
 
-def send_actuator_command(args, actuator_id, actuator_category, command_type, command_body):
+def send_actuator_command(
+    actuator_id,
+    actuator_category,
+    command_type,
+    command_body,
+):
     actuators_repository = get_actuators_repository()
     command = build_command_message(command_type, command_body)
     if command is None:
@@ -29,7 +34,7 @@ def send_actuator_command(args, actuator_id, actuator_category, command_type, co
         return None
     address = (actuator.ip_address, actuator.communication_port)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(args.base_timeout)
+        sock.settimeout(1.0)
         try:
             sock.connect(address)
             sock.send(command)
@@ -51,7 +56,7 @@ def send_actuator_command(args, actuator_id, actuator_category, command_type, co
     return reply
 
 
-def actuator_handler(args, sock, address):
+def actuator_handler(sock, address):
     try:
         logger = logging.getLogger(f'ACTUATOR_HANLDER_{address}')
         msg = sock.recv(1024)
@@ -103,20 +108,19 @@ def actuator_handler(args, sock, address):
     )
 
 
-def actuators_listener(args):
+def actuators_listener(stop_flag, actuators_port):
     logger = logging.getLogger('ACTUATORS_LISTENER')
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('', args.actuators_port))
+        sock.bind(('', actuators_port))
         sock.listen()
         logger.info(
-            'Escutando por atualizações dos atuadores em (%s, %s)',
-            args.host_ip,
-            args.actuators_port,
+            'Escutando por atualizações dos atuadores na porta %d',
+            actuators_port,
         )
-        sock.settimeout(args.base_timeout)
+        sock.settimeout(1.0)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            while not args.stop_flag.is_set():
+            while not stop_flag.is_set():
                 try:
                     conn, addrs = sock.accept()
                 except TimeoutError:
@@ -130,7 +134,7 @@ def actuators_listener(args):
                     continue
                 try:
                     conn.settimeout(sock.gettimeout())
-                    executor.submit(actuator_handler, args, conn, addrs)
+                    executor.submit(actuator_handler, conn, addrs)
                 except Exception:
                     try:
                         conn.shutdown(socket.SHUT_RDWR)

@@ -389,11 +389,11 @@ def _run(args):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Simulador de semáforo')
+    parser = argparse.ArgumentParser(description='Simulador de semáforo.')
 
     parser.add_argument(
         '--id', type=int, default=1,
-        help='Nome que unicamente identifica o semáforo.'
+        help='Id que unicamente identifica o semáforo.'
     )
 
     parser.add_argument(

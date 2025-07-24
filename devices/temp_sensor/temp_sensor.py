@@ -216,11 +216,11 @@ def _run(args):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Sensor de temperatura')
+    parser = argparse.ArgumentParser(description='Sensor de temperatura.')
 
     parser.add_argument(
         '--id', type=int, default=1,
-        help='Nome que unicamente identifica o sensor de temperatura.'
+        help='Id que unicamente identifica o sensor de temperatura.'
     )
 
     parser.add_argument(

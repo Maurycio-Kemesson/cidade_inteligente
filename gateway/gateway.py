@@ -113,7 +113,7 @@ def _run():
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Gateway')
+    parser = argparse.ArgumentParser(description='Gateway central.')
 
     parser.add_argument(
         '-l', '--level', type=str, default='INFO',

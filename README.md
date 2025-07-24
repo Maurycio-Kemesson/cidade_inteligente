@@ -1,24 +1,59 @@
 # 🌐 Cidade Inteligente - Sistemas Distribuídos com Sockets
-Este projeto simula uma Cidade Inteligente com sensores e atuadores que se comunicam com um Gateway central. Foi desenvolvido um cliente CLI que permite o monitoramento e controle dos dispositivos inteligentes.
+Este projeto simula uma Cidade Inteligente composta por sensores, atuadores e clientes, todos interconectados por meio de um Gateway central. O objetivo é fornecer uma base prática para o estudo de sistemas distribuídos e redes de comunicação.
+
+Clientes interagem com o sistema exclusivamente por meio do Gateway, que atua como intermediário para monitoramento, controle e consumo de dados dos dispositivos inteligentes.
 
 
-## 🧠 O que é?
+## 🧱 Evolução do Projeto
+- **Versão 1**
 
-Um sistema distribuído para aprendizado de comunicação entre processos. Ele simula:
+Dispositivos e clientes se comunicam diretamente com o Gateway por meio de sockets e mensagens serializadas usando Protocol Buffers (protobuf).
 
-- **Dispositivos Inteligentes:** sensores e atuadores que interagem com o ambiente.
-- **Gateway Central:** responsável pela coordenação e comunicação entre dispositivos.
-- **Cliente CLI:** interface de controle e monitoramento em tempo real.
+- **Versão 2**
+
+Foi introduzido um Message Broker (RabbitMQ) entre sensores e Gateway, promovendo uma comunicação assíncrona e desacoplada.
+
+A comunicação com os atuadores foi migrada de protobuf puro para gRPC, proporcionando maior padronização e robustez.
+
+Também foi desenvolvida uma Web API que permite o acesso de clientes ao sistema via HTTP, mantendo-se o suporte à comunicação original (sockets + protobuf) por questões de retrocompatibilidade.
+
+As mensagens trafegadas via RabbitMQ continuam a ser serializadas usando protobuf.
+
+
+## 🧠 Componentes
+
+#### 🔌 **Dispositivos Inteligentes**
+
+Sensores e atuadores responsáveis por monitorar e interagir com o ambiente físico.
+
+#### 🧠 **Gateway Central**
+
+Núcleo do sistema que coordena as interações entre dispositivos e clientes, atuando como ponto de integração e roteamento.
+
+#### 📨 **Message Broker (RabbitMQ)**
+
+Intermediário entre sensores e o gateway, proporcionando comunicação assíncrona e desacoplada.
+
+🖥️ **Clientes**
+
+Interfaces (CLI, Web e Mobile) para monitoramento e controle dos dispositivos em tempo real.
 
 ## 🔧 Tecnologias Utilizadas
 
-- **Ubuntu-24.04:** os sockets foram configurados tendo em mente uma plataforma Unix;
-- **Python v3.12.3:** desenvolvimento do gateway, cliente CLI, sensor de temperatura e semáforo (atuador);
-- **Node.js v20.18.2:** poste de iluminação (lâmpada inteligente);
-- **Sockets TCP e UDP:** comunicação entre dispositivos;
-- **UDP Multicast:** dispositivos inteligêntes descobrem a localização do gateway usando um grupo multicast;
-- **libprotoc v31.1:** compilação das mensagens `.proto`.
-- **Flutter v3.32.5 *** cliente web/mobile
+**Ubuntu 24.04:** sistema operacional base. Os sockets foram configurados visando compatibilidade com ambientes Unix.
+
+**Python 3.12.3:** linguagem principal utilizada no desenvolvimento do gateway, Web API, cliente CLI, sensor de temperatura e semáforo.
+
+**Node.js 22.17.0:** utilizado na implementação da lâmpada inteligente (poste de iluminação).
+
+**Sockets TCP e UDP:** base para a comunicação direta entre dispositivos.
+
+**UDP Multicast:** mecanismo usado para descoberta automática do Gateway e Broker por parte dos dispositivos inteligentes.
+
+**Protocol Buffers (libprotoc 31.1):** protocolo de serialização utilizado na comunicação entre componentes distribuídos.
+
+**Flutter 3.32.5:** framework utilizado para o desenvolvimento do cliente com interface web e mobile.
+
 
 ## 📦 Estrutura de Diretórios
 
@@ -26,139 +61,27 @@ Um sistema distribuído para aprendizado de comunicação entre processos. Ele s
 cidade_inteligente/
 ├── clients/
 │   └── simple_client/      # Cliente CLI Python
-│   └── client_flutter/     # Cliente interface web flutter
-├── devices/                # Código dos dispositivos inteligentes
+│   └── client_flutter/     # Cliente Web/Mobile Flutter
+├── devices/                # Dispositivos inteligentes
 │   ├── lamp_node/          # Lâmpada inteligente em Node.js
 │   ├── semaphore/          # Semáforo em Python
 │   └── temp_sensor/        # Sensor de temperatura em Python
 ├── exemplos/               # Code snippets
 ├── gateway/                # Código do Gateway em Python
-│   ├── gateway.py               # Entry-point do Gateway
-|   ├── db.py                    # Abstração de um banco de dados
-|   ├── registration_handler.py  # Módulo responsável pelo multicast e registro de dispostivos
-|   ├── sensors_handler.py       # Módulo responsável pelos sensores
+|   ├── db/                      # Banco de dados usando SQLAlchemy + SQLite
 |   ├── actuators_handler.py     # Módulo responsável pelos atuadores
-|   └── clients_handler.py       # Módulo responsável pelos clientes
+|   ├── api.py                   # Web API
+|   ├── clients_handler.py       # Módulo responsável pelos clientes
+|   ├── config.yaml              # Arquivo de configuração do Gateway
+│   ├── gateway.py               # Entry-point do Gateway
+|   ├── registration_handler.py  # Módulo responsável pelo multicast e registro de dispostivos
+|   ├── requirements.txt         # Lista de dependência do Gateway
+|   └── sensors_handler.py       # Módulo responsável pelos sensores
 ├── protos/                 
 │   └── messages.proto       # Mensagens do Protobuf
-├── python-requirements.txt  # Lista de dependência Python
 └── README.md                # Documentação principal
 ```
 
-## Diagramas de funcionamento
-```mermaid
-flowchart BT
-    subgraph Gateway
-        descobrimento([Serviço de Descobrimento])
-        registro([Serviço de Registro])
-        sensores([Serviço de Sensores])
-        atuadores([Serviço de Atuadores])
-        relatorios([Gerador de Relatórios])
-    end
-
-    desc_descobrimento[Socket UDP enviando o endereço do Serviço de Registro ao grupo multicast 224.0.1.0 na porta 50333. Envia a cada 5 segundos.]
-    desc_descobrimento --- descobrimento
-
-    desc_registro[Servidor TCP escutando na porta 50111. É responsável pelo registro de dispositivos inteligentes.]
-    desc_registro --- registro
-
-    desc_sensores[Socket UDP escutando na porta 50222. É responsável por receber leituras dos sensores registrados.]
-    desc_sensores --- sensores
-
-    desc_atuadores[Servidor TCP escutando na porta 50222. É responsável por receber atualizações dos atuadores registrados. Também possuí funcionalidades para enviar comandos aos atuadores.]
-    desc_atuadores --- atuadores
-
-    desc_relatorios[Gera a cada 5 segundos relatórios sobre os dispositivos registrados. Os relatórios contêm informações como metadados, estado e disponibilidade. Os clientes podem solicitar os relatórios.]
-    desc_relatorios --- relatorios
-```
-
-```mermaid
-flowchart TD
-    subgraph Sensor
-        envio([Thread de envio de dados])
-        descobrimento([Thread de descobrimento e checagem de disponibilidade])
-    end
-
-    enviar[Enviar leitura]
-    esperar[Esperar conexão]
-    conectar[Se registrar no Gateway]
-    desconectar[Desconectar dispositivo e realizar novo registro]
-    desconectar_se[Desconectar se conectado]
-    continuar[Continuar escutando]
-    continuar_conn[Continuar conectado]
-
-    perg_conn{Conectado ao Gateway?}
-    perg_escutou{Escutou o endereço do Gateway no grupo multicast?}
-    perg_realocar{O IP recebido no multicast mudou?}
-    perg_falhas{3 falhas seguidas ao tentar receber endereço?}
-
-    descobrimento-->perg_escutou
-    perg_escutou-->|Não|perg_falhas
-    perg_escutou-->|Sim|perg_conn
-    perg_falhas-->|Sim|desconectar_se
-    desconectar_se-->continuar
-    perg_falhas-->|Não|continuar
-    perg_conn-->|Não|conectar
-    conectar-->continuar
-    perg_conn-->|Sim|perg_realocar
-    perg_realocar-->|Não|continuar_conn
-    continuar_conn-->continuar
-    perg_realocar-->|Sim|desconectar
-    desconectar-->continuar
-
-    envio-->envp1
-    envp1{Conectado ao Gateway?}
-    envp1-->|Sim|enviar
-    envp1-->|Não|esperar
-```
-
-```mermaid
-flowchart TD
-    subgraph Atuador
-        envio([Thread de envio de dados])
-        descobrimento([Thread de descobrimento e checagem de disponibilidade])
-        comandos([Servidor TCP esperando comandos do Gateway])
-    end
-
-    conectar[Se registrar no Gateway]
-    desconectar[Desconectar dispositivo e realizar novo registro]
-    desconectar_se[Desconectar se conectado]
-    continuar[Continuar escutando]
-    continuar_conn[Continuar conectado]
-
-    perg_conn{Conectado ao Gateway?}
-    perg_escutou{Escutou o endereço do Gateway no grupo multicast?}
-    perg_realocar{O IP recebido no multicast mudou?}
-    perg_falhas{3 falhas seguidas ao tentar receber endereço?}
-
-    descobrimento-->perg_escutou
-    perg_escutou-->|Não|perg_falhas
-    perg_escutou-->|Sim|perg_conn
-    perg_falhas-->|Sim|desconectar_se
-    desconectar_se-->continuar
-    perg_falhas-->|Não|continuar
-    perg_conn-->|Não|conectar
-    conectar-->continuar
-    perg_conn-->|Sim|perg_realocar
-    perg_realocar-->|Não|continuar_conn
-    continuar_conn-->continuar
-    perg_realocar-->|Sim|desconectar
-    desconectar-->continuar
-
-    enviar[Enviar atualização ao Gateway]
-    esperar[Esperar conexão]
-
-    perg_atualizacao{Atualização de estado?}
-    perg_conn_envio{Conectado ao Gateway?}
-    perg_passou{Passou 5 segundos sem novas atualizações?}
-
-    envio-->perg_conn_envio
-    perg_conn_envio-->|Sim|perg_atualizacao
-    perg_conn_envio-->|Não|esperar
-    perg_atualizacao-->|Não|perg_passou
-    perg_atualizacao-->|Sim|enviar
-    perg_passou-->|Sim|enviar
-```
 
 ## ▶️ Como Executar
 
@@ -171,39 +94,136 @@ libprotoc 31.1
 # Python
 $ protoc --python_out=. --pyi_out=. messages.proto
 # Node.js
+$ npm install -g protoc-gen-js
 $ protoc --js_out=import_style=commonjs,binary:. messages.proto
-# Flutter
-$ flutter pub get
-$ flutter run
 ```
 
-### 2. Rodar os processos
+### 2. Rodar os componentes
 
-**Python:**
+**Gateway**
+
+Antes de iniciar o Gateway é necessário subir o Broker. O jeito mais fácil é utilizando docker.
+
 ```bash
-$ cd cidade_inteligente/
+$ docker run --rm --name rabbitmq --hostname rmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
+```
+
+Depois que o Broker estiver rodando, rodar o Gateway.
+
+```bash
+$ cd cidade_inteligente/gateway/
 $ python3.12 -m venv venv
 $ source venv/bin/activate
-(venv) $ pip install -r python-requirements.txt
-(venv) $ python gateway/gateway.py --help
+(venv) $ pip install -r requirements.txt
+(venv) $ python gateway.py --help
+usage: gateway.py [-h] [-l {DEBUG,INFO,WARN,ERROR}] [-c]
+
+Gateway central.
+
+options:
+  -h, --help            show this help message and exit
+  -l {DEBUG,INFO,WARN,ERROR}, --level {DEBUG,INFO,WARN,ERROR}
+                        Nível do logging.
+  -c, --clear           Limpar o banco de dados ao iniciar.
+(venv) $ python gateway.py --clear
 ```
-ou
+
+
+**Semáfoto**
+
 ```bash
-(venv) $ python devices/semaphore/semaphore.py --help
+$ cd cidade_inteligente/devices/semaphore/
+$ python3.12 -m venv venv
+$ source venv/bin/activate
+(venv) $ pip install -r requirements.txt
+(venv) $ python semaphore.py --help
+usage: semaphore.py [-h] [--id ID] [--port PORT] [--multicast_ip MULTICAST_IP] [--multicast_port MULTICAST_PORT] [--disconnect_after DISCONNECT_AFTER]
+                    [-l {DEBUG,INFO,WARN,ERROR}]
+
+Simulador de semáforo.
+
+options:
+  -h, --help            show this help message and exit
+  --id ID               Id que unicamente identifica o semáforo.
+  --port PORT           Porta na qual o Gateway envia comandos ao atuador.
+  --multicast_ip MULTICAST_IP
+                        IP multicast para descobrimento do Gateway.
+  --multicast_port MULTICAST_PORT
+                        Porta na qual escutar por mensagens do grupo multicast.
+  --disconnect_after DISCONNECT_AFTER
+                        Número de falhas sequenciais necessárias para desconectar o Gateway.
+  -l {DEBUG,INFO,WARN,ERROR}, --level {DEBUG,INFO,WARN,ERROR}
+                        Nível do logging.
+(venv) $ python semaphore.py
 ```
-ou
+
+**Sensor de temperatura**
+
 ```bash
-(venv) $ python devices/temp_sensor/temp_sensor.py --help
+$ cd cidade_inteligente/devices/temp_sensor/
+$ python3.12 -m venv venv
+$ source venv/bin/activate
+(venv) $ pip install -r requirements.txt
+(venv) $ python temp_sensor.py --help
+usage: temp_sensor.py [-h] [--id ID] [--multicast_ip MULTICAST_IP] [--multicast_port MULTICAST_PORT] [--report_interval REPORT_INTERVAL]
+                      [--temperature TEMPERATURE] [--max_temperature MAX_TEMPERATURE] [--min_temperature MIN_TEMPERATURE]
+                      [--disconnect_after DISCONNECT_AFTER] [-l {DEBUG,INFO,WARN,ERROR}]
+
+Sensor de temperatura.
+
+options:
+  -h, --help            show this help message and exit
+  --id ID               Id que unicamente identifica o sensor de temperatura.
+  --multicast_ip MULTICAST_IP
+                        IP multicast para descobrimento do Gateway.
+  --multicast_port MULTICAST_PORT
+                        Porta na qual escutar por mensagens do grupo multicast.
+  --report_interval REPORT_INTERVAL
+                        Intervalo entre o envio de leituras.
+  --temperature TEMPERATURE
+                        Temperatura inicial do sensor em °C.
+  --max_temperature MAX_TEMPERATURE
+                        Temperatura máximo do sensor em °C.
+  --min_temperature MIN_TEMPERATURE
+                        Temperatura mínima do sensor em °C.
+  --disconnect_after DISCONNECT_AFTER
+                        Número de falhas sequenciais necessárias para desconectar o dispositivo.
+  -l {DEBUG,INFO,WARN,ERROR}, --level {DEBUG,INFO,WARN,ERROR}
+                        Nível do logging.
+(venv) $ python temp_sensor.py
 ```
-ou
+
+**Cliente CLI**
+
 ```bash
-(venv) $ python clients/simple_client/simple_client.py
+$ cd cidade_inteligente/clients/simple_client/
+$ python3.12 -m venv venv
+$ source venv/bin/activate
+(venv) $ pip install -r requirements.txt
+(venv) $ python simple_client.py
 >>> help
+The following commands are available:
+  help      : Show this help message
+  sensors   : List sensors devices
+  actuators : List actuators devices
+  sensor <name>
+            : Show all available data of sensor <name>
+  actuator <name>
+            : Show actuator <name> informations
+  actuator <name> <action>
+            : Send action <action> to actuator <name>
+            : <name> and <action> must not be enclosed in double quotes
+  actuator <name> <key> <value>
+            : Set state <key> to <value> for actuator <name>
+            : <value> must be a valid stringfyed JSON value
+            : <key> must not be enclosed in double quotes
+            : If <value> is a string, it must be enclosed in double quotes
 ```
 
 **Node.js:**
+
 ```bash
-$ cd cidade_inteligente/
+$ cd cidade_inteligente/devices/lamp_node/
 $ npm install protobufjs
-$ node devices/lamp_node/lamp.js
+$ npm run start
 ```

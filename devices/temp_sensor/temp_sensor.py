@@ -159,9 +159,7 @@ def transmit_readings(args):
         )
         
         try:
-            # Enviar leitura via gRPC (usando método existente)
-            # Como não temos método específico, usaremos GetSensorData
-            # como placeholder (deveria ser criado um método adequado no .proto)
+            # Enviar leitura via gRPC (usando método existente)\
             response = stub.GetSensorData(reading)
             logger.debug('Leitura de temperatura enviada para o Gateway')
         except grpc.RpcError as rpc_error:

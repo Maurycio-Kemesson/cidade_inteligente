@@ -1,116 +1,124 @@
+import json
 import time
 import logging
-import datetime
-import pika
-from pika.exceptions import AMQPError
-from db.repositories import get_sensors_repository
-from messages_pb2 import SensorReading
+import grpc
+from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor
+from messages_pb2 import SensorReading, SensorsReport, Empty
+from messages_pb2_grpc import GatewayServiceServicer, add_GatewayServiceServicer_to_server
+from google.protobuf.message import DecodeError
 
 
-def register_reading(body):
-    reading = SensorReading()
-    reading.ParseFromString(body)
-    sensor_category, sensor_id = reading.device_name.split('-')
-    sensor_id = int(sensor_id)
-    sensors_repository = get_sensors_repository()
-    result = sensors_repository.register_sensor_reading(
-        sensor_id=sensor_id,
-        sensor_category=sensor_category,
-        reading_value=reading.reading_value,
-        reading_timestamp=datetime.datetime.fromisoformat(reading.timestamp),
-    )
-    return result, reading.device_name
+def sensors_report_generator(args):
+    logger = logging.getLogger('SENSORS_REPORT_GENERATOR')
+    logger.info('Iniciando o gerador de relatórios dos sensores')
+    while not args.stop_flag.is_set():
+        with args.db_sensors_lock:
+            sensors = args.db.get_sensors_summary()
+        today = date.today()
+        now_clock = time.monotonic()
+        tolerance = args.sensors_tolerance
+        for i, sensor_summary in enumerate(sensors):
+            last_seen = sensor_summary['last_seen']
+            is_online = (
+                last_seen[0] == today
+                and (now_clock - last_seen[1]) <= tolerance
+            )
+            sensors[i] = SensorReading(
+                device_name=sensor_summary['device_name'],
+                reading_value=sensor_summary['reading_value'],
+                timestamp=sensor_summary['timestamp'].isoformat(),
+                metadata=json.dumps(sensor_summary['metadata']),
+                is_online=is_online,
+            )
+        logger.debug(
+            'Novo relatório gerado: %d sensores reportados',
+            len(sensors),
+        )
+        report = SensorsReport(devices=sensors).SerializeToString()
+        with args.db_sensors_report_lock:
+            args.db.sensors_report = report
+        time.sleep(args.reports_gen_interval)
 
 
-def sensors_consumer(stop_flag, broker_ip, broker_port, publish_exchange):
-    logger = logging.getLogger('SENSORS_CONSUMER')
-    def callback(ch, method, properties, body):
+class SensorDataServicer(GatewayServiceServicer):
+    def __init__(self, args):
+        self.args = args
+        self.logger = logging.getLogger('SENSOR_DATA_SERVICER')
+
+    def GetSensorsReport(self, request, context):
         try:
-            result, sensor_name = register_reading(body)
+            self.logger.debug('Solicitado relatório de sensores')
+            with self.args.db_sensors_report_lock:
+                report_data = self.args.db.sensors_report
+            if not report_data:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details('Relatório de sensores não disponível')
+                return SensorsReport()
+            return SensorsReport.FromString(report_data)
         except Exception as e:
-            logger.error(
-                'Falha ao processar mensagem: (%s) %s',
+            self.logger.error(
+                'Erro ao gerar relatório de sensores: (%s) %s',
                 type(e).__name__,
                 e,
             )
-            return
-        if result:
-            logger.debug(
-                'Leitura de sensor recebida: %s',
-                sensor_name,
-            )
-        else:
-            logger.warning(
-                'Recebendo leituras de um sensor não registrado: %s',
-                sensor_name,
-            )
-    while not stop_flag.is_set():
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return SensorsReport()
+
+    def GetSensorData(self, request, context):
         try:
-            connection = pika.BlockingConnection(
-                pika.ConnectionParameters(
-                    host=broker_ip,
-                    port=broker_port,
-                    socket_timeout=1.0,
-                    heartbeat=2,
+            device_name = request.device_name
+            self.logger.debug('Solicitados dados do sensor: %s', device_name)
+            
+            with self.args.db_sensors_lock:
+                sensor = self.args.db.get_sensor(device_name)
+            
+            if sensor is None:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(f'Sensor {device_name} não encontrado')
+                return SensorData()
+            
+            readings = [
+                SensorData.SimpleReading(
+                    timestamp=timestamp.isoformat(), reading_value=reading,
                 )
+                for timestamp, reading in sensor['data']
+            ]
+            
+            ls_day, ls_clock = sensor['last_seen']
+            is_online = (
+                ls_day == date.today()
+                and (time.monotonic() - ls_clock) <= self.args.sensors_tolerance
             )
-            channel = connection.channel()
-            try:
-                logger.info(
-                    'Conexão bem-sucedida com Broker em (%s, %d)',
-                    broker_ip,
-                    broker_port,
-                )
-                channel.exchange_declare(
-                    exchange=publish_exchange,
-                    exchange_type='fanout',
-                )
-                result = channel.queue_declare(queue='', exclusive=True)
-                exclusive_queue = result.method.queue
-                channel.queue_bind(exchange=publish_exchange, queue=exclusive_queue)
-                channel.basic_consume(
-                    queue=exclusive_queue,
-                    on_message_callback=callback,
-                    auto_ack=True,
-                )
-                logger.info(
-                    'Consumindo mensagens da exchange %s',
-                    publish_exchange,
-                )
-                fail_count = 0
-                max_num_fails = 3
-                while not stop_flag.is_set():
-                    try:
-                        connection.process_data_events(time_limit=1.0)
-                        fail_count = 0
-                    except Exception as e:
-                        fail_count += 1
-                        logger.error(
-                            'Erro ao receber nova mensagem: (%s) %s',
-                            type(e).__name__,
-                            e,
-                        )
-                        if fail_count > max_num_fails:
-                            logger.warning(
-                                '%d falhas consecutivas no recebimento de mensagens',
-                                max_num_fails,
-                            )
-                            break
-                logger.info('Interrompendo consumo de mensagens')
-            finally:
-                try:
-                    channel.close()
-                except Exception:
-                    pass
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-        except AMQPError as e:
-            logger.warning(
-                'Falha ao estabelecer conexão com o Broker: (%s) %s',
+            
+            return SensorData(
+                device_name=device_name,
+                metadata=json.dumps(sensor['metadata']),
+                readings=readings,
+                is_online=is_online,
+            )
+        except Exception as e:
+            self.logger.error(
+                'Erro ao recuperar dados do sensor %s: (%s) %s',
+                device_name,
                 type(e).__name__,
                 e,
             )
-            if not stop_flag.is_set():
-                time.sleep(2.0)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return SensorData()
+
+
+def run_sensor_server(args):
+    logger = logging.getLogger('SENSOR_SERVER_GRPC')
+    server = grpc.server(ThreadPoolExecutor(max_workers=10))
+    servicer = SensorDataServicer(args)
+    add_GatewayServiceServicer_to_server(servicer, server)
+    server.add_insecure_port(f'[::]:{args.sensors_port}')
+    server.start()
+    logger.info(
+        'Servidor gRPC de dados de sensores iniciado na porta %s',
+        args.sensors_port,
+    )
+    return server

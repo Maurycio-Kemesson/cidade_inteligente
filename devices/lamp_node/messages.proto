@@ -1,21 +1,13 @@
 syntax = "proto3";
 
 service GatewayService {
-  // Dispositivos
-  rpc RegisterDevice(JoinRequest) returns (JoinReply);
-  rpc GetAddress(Empty) returns (Address);
-  
-  // Clientes
-  rpc GetSensorsReport(ClientReply) returns (SensorsReport);
-  rpc GetActuatorsReport(ClientReply) returns (ActuatorsReport);
-  rpc GetSensorData(ClientReply) returns (SensorData);
-  rpc GetActuatorUpdate(ClientReply) returns (ActuatorUpdate);
-  
-  // Comandos para atuadores
-  rpc SendActuatorCommand(ActuatorCommand) returns (ActuatorComply);
+  rpc registerDevice(JoinRequest) returns (JoinReply) {}
+  rpc sendActuatorUpdate(ActuatorUpdate) returns (google.protobuf.Empty) {}
 }
 
-message Empty {}
+service ActuatorService {
+  rpc sendCommand(ActuatorCommand) returns (ActuatorComply) {}
+}
 
 // Gateway discovery
 message Address {

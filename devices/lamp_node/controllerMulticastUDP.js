@@ -6,7 +6,7 @@ const { Address } = require('./protos/messages_pb');
 /**
  * Endereço multicast
  */
-const PORT = 50333;
+const PORT = 50444;
 const MULTICAST_ADDRESS = '224.0.1.0';
 
 /**

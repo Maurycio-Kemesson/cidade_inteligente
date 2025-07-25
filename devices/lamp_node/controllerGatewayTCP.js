@@ -6,7 +6,7 @@ const { ActuatorUpdate, JoinRequest, JoinReply, DeviceType, DeviceInfo, Address,
 /**
  * Informaçoes do atuador
  */
-const DEVICE_NAME = "lamp-1";
+const DEVICE_NAME = "LAMP";
 let LAMP_STATE = '{"isOn": "yes" , "Color": "yellow", "Brightness": 10}';
 const LAMP_METADATA = '{"isOn": "(yes or no)", "Color": "(yellow or white)", "Brightness": "(Between 1 and 10)", "Actions": ["turn_on", "turn_off"]}';
 const PORT_ATUADOR = 60555;

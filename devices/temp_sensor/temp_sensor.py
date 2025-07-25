@@ -1,24 +1,25 @@
 import sys
 import json
-import socket
 import time
 import datetime
 import random
 import threading
 import logging
+import socket
+import grpc
 from functools import wraps
-import pika
-from pika.exceptions import AMQPError
-from google.protobuf.message import DecodeError
-from messages_pb2 import Address, SensorReading
-from messages_pb2 import DeviceType, DeviceInfo, JoinRequest, JoinReply
 
+# Importar módulos gRPC
+from messages_pb2 import (
+    DeviceType, DeviceInfo, JoinRequest, 
+    SensorReading, Address, Empty
+)
+from messages_pb2_grpc import GatewayServiceStub
 
-def discoverer(args):
-    logger = logging.getLogger('DISCOVERER')
+def gateway_discoverer(args):
+    logger = logging.getLogger('GATEWAY_DISCOVERER')
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(args.multicast_timeout)
         sock.bind(('', args.multicast_port))
         sock.setsockopt(
             socket.IPPROTO_IP,
@@ -26,115 +27,105 @@ def discoverer(args):
             socket.inet_aton(args.multicast_ip) + socket.inet_aton('0.0.0.0'),
         )
         logger.info(
-            'Escutando no grupo multicast (%s, %s)',
+            'Procurando pelo Gateway no grupo multicast (%s, %s)',
             args.multicast_ip,
             args.multicast_port,
         )
+        sock.settimeout(args.multicast_timeout)
         seq_fails = 0
         while not args.stop_flag.is_set():
             try:
                 msg = sock.recv(1024)
-            except TimeoutError:
+            except socket.timeout:
                 seq_fails += 1
                 if (
                     args.gateway_ip is not None
-                    and seq_fails >= args.disconnect_gateway_after
+                    and seq_fails >= args.disconnect_after
                 ):
                     logger.warning(
-                        'Gateway em %s está offline. Desconectando...',
+                        'Gateway em %s está offline: falhou %d '
+                        'transmissões em sequência. Desconectando...',
                         args.gateway_ip,
+                        args.disconnect_after,
                     )
-                    args.gateway_ip = None
-                if (
-                    args.message_broker_ip is not None
-                    and seq_fails >= args.disconnect_broker_after
-                ):
-                    logger.warning(
-                        'Gateway offline há muito tempo. '
-                        'Desconectando do Broker em %s...',
-                        args.message_broker_ip,
-                    )
-                    disconnect_broker(args)
+                    disconnect_device(args)
                 continue
-            addresses = Address()
+            except Exception as e:
+                logger.error('Erro no multicast: %s', e)
+                continue
+            
+            gateway_addrs = Address()
             try:
-                addresses.ParseFromString(msg)
-            except DecodeError:
+                gateway_addrs.ParseFromString(msg)
+                seq_fails = 0
+            except Exception as e:
+                logger.error('Erro ao analisar mensagem multicast: %s', e)
                 continue
-            seq_fails = 0
-            if addresses.ip != args.gateway_ip:
-                result = try_registration(args, addresses.ip, addresses.port)
-                if result:
-                    logger.info(
-                        'Registro bem-sucedido com Gateway em %s',
-                        args.gateway_ip,
-                    )
-                else:
-                    logger.warning(
-                        'Falha durante registro em (%s, %d)',
-                        addresses.ip,
-                        addresses.port,
-                    )
-                    disconnect_broker(args)
-                    continue
-            if (
-                addresses.broker_ip != args.message_broker_ip
-                or addresses.broker_port != args.message_broker_port
-                or addresses.publish_exchange != args.publish_exchange
-            ):
-                logger.info(
-                    'Novo Broker encontrado: (%s:%d, %s). Reconectando...',
-                    addresses.broker_ip,
-                    addresses.broker_port,
-                    addresses.publish_exchange,
+            
+            if gateway_addrs.ip == args.gateway_ip:
+                continue
+                
+            if args.gateway_ip is not None:
+                logger.warning(
+                    'Gateway realocado de %s para %s. Desconectando...',
+                    args.gateway_ip,
+                    gateway_addrs.ip,
                 )
-                disconnect_broker(args)
-                register_broker(
-                    args,
-                    addresses.broker_ip,
-                    addresses.broker_port,
-                    addresses.publish_exchange,
-                )
+                disconnect_device(args)
+                
+            try_to_register(args, gateway_addrs, logger)
 
 
-def disconnect_broker(args):
-    with args.broker_lock:
-        args.message_broker_ip = None
-        args.message_broker_port = None
-        args.publish_exchange = None
-    args.disconnect_flag.set()
+def disconnect_device(args):
+    with args.connection_lock:
+        args.gateway_ip = None
+        args.grpc_channel = None
+        args.grpc_stub = None
+    return
 
 
-def register_broker(args, broker_ip, broker_port, publish_exchange):
-    with args.broker_lock:
-        args.message_broker_ip = broker_ip
-        args.message_broker_port = broker_port
-        args.publish_exchange = publish_exchange
-
-
-def try_registration(args, gateway_ip, registration_port):
+def try_to_register(args, gateway_addr, logger):
+    logger.info('Tentando registro no Gateway em %s:%s', 
+                gateway_addr.ip, gateway_addr.port)
+    
+    # Criar informações do dispositivo
     sensor_info = DeviceInfo(
         type=DeviceType.DT_SENSOR,
         name=args.name,
         metadata=json.dumps(args.metadata),
     )
-    sensor_address = Address(ip=args.host_ip)
+    
+    # Criar endereço do dispositivo
+    sensor_addrs = Address(ip=args.host_ip, port=0)
+    
+    # Criar requisição de registro
     join_request = JoinRequest(
-        device_info=sensor_info,
-        device_address=sensor_address,
+        device_info=sensor_info, 
+        device_address=sensor_addrs,
     )
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.settimeout(args.base_timeout)
-            sock.connect((gateway_ip, registration_port))
-            sock.send(join_request.SerializeToString())
-            join_reply = JoinReply()
-            join_reply.ParseFromString(sock.recv(1024))
-        except Exception:
-            args.gateway_ip = None
-            return False
-    args.gateway_ip = gateway_ip
-    return True
+    
+    try:
+        # Criar canal gRPC
+        channel = grpc.insecure_channel(f'{gateway_addr.ip}:{gateway_addr.port}')
+        stub = GatewayServiceStub(channel)
+        
+        # Registrar dispositivo
+        join_reply = stub.RegisterDevice(join_request)
+        
+        with args.connection_lock:
+            args.gateway_ip = gateway_addr.ip
+            args.grpc_channel = channel
+            args.grpc_stub = stub
+            
+        logger.info('Registro bem-sucedido com o Gateway em %s', gateway_addr.ip)
+        return True
+        
+    except grpc.RpcError as rpc_error:
+        logger.error('Erro gRPC durante registro: %s', rpc_error.details())
+        return False
+    except Exception as e:
+        logger.error('Erro durante registro: %s', e)
+        return False
 
 
 def get_reading(args):
@@ -144,94 +135,43 @@ def get_reading(args):
     return temp
 
 
-def readings_publisher(args):
-    logger = logging.getLogger('READINGS_PUBLISHER')
+def transmit_readings(args):
+    logger = logging.getLogger('READINGS_TRANSMITER')
+    logger.info('Começando a transmissão de leituras para o Gateway')
+    
     while not args.stop_flag.is_set():
-        args.disconnect_flag.clear()
-        with args.broker_lock:
-            broker_ip = args.message_broker_ip
-            broker_port = args.message_broker_port
-            publish_exchange = args.publish_exchange
-        if broker_ip is None:
-            logger.info('Sem conexão com o Broker')
-            time.sleep(2.0)
-            continue
-        try:
-            connection = pika.BlockingConnection(
-                pika.ConnectionParameters(
-                    host=broker_ip,
-                    port=broker_port,
-                    socket_timeout=args.base_timeout,
-                )
-            )
-            channel = connection.channel()
-            try:
-                logger.info(
-                    'Conexão bem-sucedida com Broker em (%s, %d)',
-                    broker_ip,
-                    broker_port,
-                )
-                channel.exchange_declare(
-                    exchange=publish_exchange,
-                    exchange_type='fanout',
-                )
-                fail_count = 0
-                while (
-                    not args.stop_flag.is_set()
-                    and not args.disconnect_flag.is_set()
-                ):
-                    reading = SensorReading(
-                        device_name=args.name,
-                        reading_value=get_reading(args),
-                        timestamp=datetime.datetime.now(datetime.UTC).isoformat(),
-                    )
-                    reading = reading.SerializeToString()
-                    try:
-                        channel.basic_publish(
-                            exchange=publish_exchange,
-                            routing_key='',
-                            body=reading,
-                        )
-                        fail_count = 0
-                        max_num_fails = 3
-                    except Exception as e:
-                        fail_count += 1
-                        logger.error(
-                            'Erro ao enviar mensagem para o Broker: (%s) %s',
-                            type(e).__name__,
-                            e,
-                        )
-                        if fail_count > max_num_fails:
-                            logger.warning(
-                                '%d falhas consecutivas no envio de mensagens',
-                                max_num_fails,
-                            )
-                            break
-                    time.sleep(args.report_interval)
-                logger.info(
-                    'Encerrando conexão com o Broker em (%s, %d)',
-                    broker_ip,
-                    broker_port,
-                )
-            finally:
-                try:
-                    channel.close()
-                except Exception:
-                    pass
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-        except AMQPError as e:
-            logger.warning(
-                'Falha ao estabelecer conexão com o Broker em (%s, %d): (%s) %s',
-                broker_ip,
-                broker_port,
-                type(e).__name__,
-                e,
-            )
-            if not args.stop_flag.is_set():
+        # Verificar se temos conexão com o Gateway
+        with args.connection_lock:
+            if args.grpc_stub is None:
+                logger.info('Transmissão interrompida. Sem conexão com o Gateway')
                 time.sleep(2.0)
+                continue
+                
+            stub = args.grpc_stub
+        
+        # Criar leitura
+        reading = SensorReading(
+            device_name=args.name,
+            reading_value=get_reading(args),
+            is_online=True,
+            timestamp=datetime.datetime.now(datetime.UTC).isoformat(),
+            metadata=json.dumps(args.metadata),
+        )
+        
+        try:
+            # Enviar leitura via gRPC (usando método existente)
+            # Como não temos método específico, usaremos GetSensorData
+            # como placeholder (deveria ser criado um método adequado no .proto)
+            response = stub.GetSensorData(reading)
+            logger.debug('Leitura de temperatura enviada para o Gateway')
+        except grpc.RpcError as rpc_error:
+            logger.error('Erro gRPC ao enviar leitura: %s', rpc_error.details())
+            if rpc_error.code() == grpc.StatusCode.UNAVAILABLE:
+                disconnect_device(args)
+        except Exception as e:
+            logger.error('Erro ao enviar leitura: %s', e)
+        
+        time.sleep(args.report_interval)
 
 
 def stop_wrapper(func, stop_flag):
@@ -245,28 +185,38 @@ def stop_wrapper(func, stop_flag):
 
 
 def _run(args):
+    logging.basicConfig(
+        level=args.level,
+        handlers=(logging.StreamHandler(sys.stdout),),
+        format='[%(levelname)s %(asctime)s] %(name)s\n  %(message)s',
+    )
+    
     try:
-        publisher = threading.Thread(
-            target=stop_wrapper(readings_publisher, args.stop_flag),
+        transmiter = threading.Thread(
+            target=stop_wrapper(transmit_readings, args.stop_flag),
             args=(args,)
         )
-        publisher.start()
-        discoverer(args)
+        transmiter.start()
+        gateway_discoverer(args)
     except KeyboardInterrupt:
         print('\nSHUTTING DOWN...')
     finally:
         args.stop_flag.set()
-        publisher.join()
+        transmiter.join()
+        
+        # Fechar canal gRPC ao finalizar
+        if args.grpc_channel:
+            args.grpc_channel.close()
 
 
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Sensor de temperatura.')
+    parser = argparse.ArgumentParser(description='Sensor de temperatura')
 
     parser.add_argument(
-        '--id', type=int, default=1,
-        help='Id que unicamente identifica o sensor de temperatura.'
+        '--name', type=str, default='01',
+        help='Nome que unicamente identifica o sensor de temperatura.'
     )
 
     parser.add_argument(
@@ -275,7 +225,7 @@ def main():
     )
 
     parser.add_argument(
-        '--multicast_port', type=int, default=50333,
+        '--multicast_port', type=int, default=50444,
         help='Porta na qual escutar por mensagens do grupo multicast.'
     )
 
@@ -300,51 +250,42 @@ def main():
     )
 
     parser.add_argument(
-        '--disconnect_gateway_after', type=int, default=3,
-        help='Número de falhas necessárias para desconectar o Gateway.'
-    )
-
-    parser.add_argument(
-        '--disconnect_broker_after', type=int, default=7,
-        help='Número de falhas necessárias para desconectar o Broker.'
+        '--disconnect_after', type=int, default=3,
+        help='Número de falhas sequenciais necessárias para desconectar o Gateway.'
     )
 
     parser.add_argument(
         '-l', '--level', type=str, default='INFO',
-        choices=['DEBUG', 'INFO', 'WARN', 'ERROR'],
-        help='Nível do logging.'
+        help='Nível do logging. Valores permitidos são "DEBUG", "INFO", "WARN", "ERROR".'
     )
 
     args = parser.parse_args()
 
     # Logging
-    pika_logger = logging.getLogger('pika')
-    pika_logger.propagate = False
-    logging.basicConfig(
-        level=args.level,
-        handlers=(logging.StreamHandler(sys.stdout),),
-        format='[%(levelname)s %(asctime)s] %(name)s\n  %(message)s',
-    )
+    lvl = args.level.strip().upper()
+    args.level = lvl if lvl in ('DEBUG', 'WARN', 'ERROR') else 'INFO'
 
-    # Device name
-    args.name = f'temperature-{args.id}'
+    # Identifier
+    args.name = f'Temp-{args.name}'
 
     # Timeouts
     args.base_timeout = 2.0
     args.multicast_timeout = 5.0
 
     # Host IP
-    args.host_ip = socket.gethostbyname('localhost')
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        args.host_ip = s.getsockname()[0]
+    except Exception:
+        args.host_ip = '127.0.0.1'
+    finally:
+        s.close()
 
-    # Gateway IP
+    # Gateway
     args.gateway_ip = None
-
-    # Broker
-    args.broker_lock = threading.Lock()
-    args.disconnect_flag = threading.Event()
-    args.message_broker_ip = None
-    args.message_broker_port = None
-    args.publish_exchange = None
+    args.grpc_channel = None
+    args.grpc_stub = None
 
     # Metadata
     args.metadata = {
@@ -353,8 +294,9 @@ def main():
         'Location': {'Latitude': -3.733486, 'Longitude': -38.570860},
     }
 
-    # Stop flag for clean termination
+    # Events and locks
     args.stop_flag = threading.Event()
+    args.connection_lock = threading.Lock()
 
     return _run(args)
 

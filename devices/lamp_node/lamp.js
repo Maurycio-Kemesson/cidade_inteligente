@@ -19,3 +19,4 @@ process.on('SIGINT', () => {
   CONTROLLER_GATEWAY.turnOffAtuador();
   process.exit(0);
 });
+

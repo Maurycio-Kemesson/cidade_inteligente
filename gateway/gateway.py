@@ -2,13 +2,12 @@ import sys
 import socket
 import threading
 import logging
-from functools import wraps
-from api import app, ApiServerThread
-from registration_handler import multicast_locations, registration_listener
-from sensors_handler import sensors_consumer
-from actuators_handler import actuators_listener
+from db import Database
+from registration_handler import multicast_location, registration_listener
+from sensors_handler import sensors_listener, sensors_report_generator
+from actuators_handler import actuators_listener, actuators_report_generator
 from clients_handler import clients_listener
-from db.sessions import init_db
+from functools import wraps
 
 
 def stop_wrapper(func, stop_flag):
@@ -21,104 +20,100 @@ def stop_wrapper(func, stop_flag):
     return wrapper
 
 
-def load_configs():
-    import yaml
-    from pathlib import Path
-    from types import SimpleNamespace
-    config_file = Path(__file__).resolve().parent / 'config.yaml'
-    with config_file.open('r') as f:
-        configs = SimpleNamespace(**yaml.safe_load(f))
-    configs.host_ip = socket.gethostbyname('localhost')
-    if configs.broker_ip == 'localhost':
-        configs.broker_ip = configs.host_ip
-    return configs
-
-
-def _run():
-    stop_flag = threading.Event()
+def _run(args):
+    logging.basicConfig(
+        level=args.level,
+        handlers=(logging.StreamHandler(sys.stdout),),
+        format='[%(levelname)s %(asctime)s] %(name)s\n  %(message)s',
+    )
     try:
-        configs = load_configs()
-        se_consumer = threading.Thread(
-            target=stop_wrapper(sensors_consumer, stop_flag),
-            args=(
-                stop_flag,
-                configs.broker_ip,
-                configs.broker_port,
-                configs.publish_exchange,
-            ),
+        rlistener = threading.Thread(
+            target=stop_wrapper(registration_listener, args.stop_flag),
+            args=(args,)
         )
-        ac_listener = threading.Thread(
-            target=stop_wrapper(actuators_listener, stop_flag),
-            args=(
-                stop_flag,
-                configs.actuators_port,
-            ),
+        slistener = threading.Thread(
+            target=stop_wrapper(sensors_listener, args.stop_flag),
+            args=(args,)
         )
-        cl_listener = threading.Thread(
-            target=stop_wrapper(clients_listener, stop_flag),
-            args=(
-                stop_flag,
-                configs.clients_port,
-            ),
-        )
-        re_listener = threading.Thread(
-            target=stop_wrapper(registration_listener, stop_flag),
-            args=(
-                stop_flag,
-                configs.registration_port,
-                configs.sensors_tolerance,
-                configs.actuators_port,
-                configs.actuators_tolerance,
-            ),
+        alistener = threading.Thread(
+            target=stop_wrapper(actuators_listener, args.stop_flag),
+            args=(args,)
         )
         multicaster = threading.Thread(
-            target=stop_wrapper(multicast_locations, stop_flag),
-            args=(
-                stop_flag,
-                configs.multicast_ip,
-                configs.multicast_port,
-                configs.multicast_interval,
-                configs.host_ip,
-                configs.registration_port,
-                configs.broker_ip,
-                configs.broker_port,
-                configs.publish_exchange,
-            ),
+            target=stop_wrapper(multicast_location, args.stop_flag),
+            args=(args,)
         )
-        api_server = ApiServerThread(
-            stop_flag,
-            configs.host_ip,
-            configs.api_port,
-            app,
+        sgenerator = threading.Thread(
+            target=stop_wrapper(sensors_report_generator, args.stop_flag),
+            args=(args,)
         )
-        se_consumer.start()
-        ac_listener.start()
-        cl_listener.start()
-        re_listener.start()
+        agenerator = threading.Thread(
+            target=stop_wrapper(actuators_report_generator, args.stop_flag),
+            args=(args,)
+        )
+        rlistener.start()
+        slistener.start()
+        alistener.start()
         multicaster.start()
-        api_server.start()
-        stop_flag.wait()
+        sgenerator.start()
+        agenerator.start()
+        clients_listener(args)
     except KeyboardInterrupt:
         print('\nSHUTTING DOWN...')
     finally:
-        stop_flag.set()
-        se_consumer.join()
-        ac_listener.join()
-        cl_listener.join()
-        re_listener.join()
+        args.stop_flag.set()
+        rlistener.join()
+        slistener.join()
+        alistener.join()
         multicaster.join()
-        api_server.shutdown()
+        sgenerator.join()
+        agenerator.join()
+        args.db.persist()
 
 
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Gateway central.')
+    parser = argparse.ArgumentParser(description='Gateway')
+
+    parser.add_argument(
+        '--clients_port', type=int, default=50000,
+        help='Porta para comunicação com os clientes. Usa TCP.'
+    )
+
+    parser.add_argument(
+        '--registration_port', type=int, default=50111,
+        help='Porta em que os dispositivos se registram no Gateway. Usa TCP.'
+    )
+
+    parser.add_argument(
+        '--sensors_port', type=int, default=50222,
+        help='Porta de recebimento de dados sensoriais. Usa UDP.'
+    )
+
+    parser.add_argument(
+        '--actuators_port', type=int, default=50333,
+        help='Porta de recebimento dos dados dos atuadores. Usa TCP.'
+    )
+
+    parser.add_argument(
+        '--multicast_ip', type=str, default='224.0.1.0',
+        help='IP para multicast do endereço do Gateway.'
+    )
+
+    parser.add_argument(
+        '--multicast_port', type=int, default=50444,
+        help='Porta para multicast do endereço do Gateway.'
+    )
+
+    parser.add_argument(
+        '--multicast_interval', type=float, default=2.5,
+        help='Intervalo de envio do endereço do Gateway para o grupo multicast.'
+    )
 
     parser.add_argument(
         '-l', '--level', type=str, default='INFO',
-        choices=['DEBUG', 'INFO', 'WARN', 'ERROR'],
-        help='Nível do logging.'
+        help='Nível do logging. Valores permitidos são "DEBUG", "INFO", "WARN" e "ERROR".'
     )
 
     parser.add_argument(
@@ -129,18 +124,35 @@ def main():
     args = parser.parse_args()
 
     # Logging
-    pika_logger = logging.getLogger('pika')
-    pika_logger.propagate = False
-    logging.basicConfig(
-        level=args.level,
-        handlers=(logging.StreamHandler(sys.stdout),),
-        format='[%(levelname)s %(asctime)s] %(name)s\n  %(message)s',
-    )
+    lvl = args.level.strip().upper()
+    args.level = lvl if lvl in ('DEBUG', 'WARN', 'ERROR') else 'INFO'
 
-    # Database
-    init_db(args.clear)
+    # Timeouts
+    args.base_timeout = 1.0
 
-    return _run()
+    # Host IP
+    args.host_ip = socket.gethostbyname('localhost')
+
+    # Database and stop event
+    args.db = Database(clear=args.clear)
+    args.stop_flag = threading.Event()
+
+    # Reports
+    args.reports_gen_interval = 5
+
+    # Sensors utilities
+    args.sensors_tolerance = 6.0
+    args.db_sensors_lock = threading.Lock()
+    args.db_sensors_report_lock = threading.Lock()
+
+    # Actuators utilities
+    args.actuators_tolerance = 6.0
+    args.pending_actuators_updates = threading.Event()
+    args.pending_actuators_updates.set()
+    args.db_actuators_lock = threading.Lock()
+    args.db_actuators_report_lock = threading.Lock()
+
+    return _run(args)
 
 
 if __name__ == '__main__':
